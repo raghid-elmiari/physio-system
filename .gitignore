@@ -17,3 +17,4 @@ backend/data/
 .vscode/
 __pycache__/
 .DS_Store
+push-to-github.bat
