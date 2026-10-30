@@ -1,0 +1,19 @@
+# Secrets: never commit real environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build output and dependencies
+node_modules/
+dist/
+target/
+backend/data/
+*.log
+
+# Local tooling
+.claude/
+.idea/
+.vscode/
+__pycache__/
+.DS_Store

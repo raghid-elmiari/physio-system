@@ -1,0 +1,9 @@
+{
+  "appId": "com.example.physiocoach",
+  "appName": "PhysioCoach",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  }
+}

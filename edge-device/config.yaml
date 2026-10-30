@@ -1,0 +1,25 @@
+# Configuration for the UNO Q device agent.
+# Copy to config.local.yaml and fill in real values before running — this file is the
+# checked-in template, not a file containing real credentials.
+
+device_id: "UNOQ-001"
+api_key: "REPLACE_WITH_KEY_FROM_REGISTRATION"   # returned once by POST /api/admin/devices
+
+backend:
+  base_url: "http://localhost:8080"
+  heartbeat_interval_seconds: 10
+
+ai_service:
+  base_url: "http://localhost:5001"   # can point at a local service running ON the UNO Q
+                                       # itself (see docs/ARCHITECTURE.md — MediaPipe runs
+                                       # natively on the UNO Q's Debian Linux side), or at
+                                       # a separate machine if you split the AI service out
+
+camera:
+  index: 0            # OpenCV VideoCapture device index
+  target_fps: 10       # realistic target per the earlier hardware-feasibility analysis,
+                        # not the desktop-class 25-30fps a laptop deployment could hit
+
+offline_buffer:
+  max_queued_events: 2000   # bounded queue — see device_agent.py's OfflineBuffer class
+  max_queue_age_seconds: 3600

@@ -1,0 +1,41 @@
+{
+  "name": "physio-coach-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "setup:mediapipe": "node scripts/setup-mediapipe.mjs",
+    "predev": "node scripts/setup-mediapipe.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/setup-mediapipe.mjs",
+    "build": "vite build",
+    "prebuild:android": "node scripts/setup-mediapipe.mjs",
+    "build:android": "vite build --mode android",
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "android:sync": "npm run build:android && cap sync android",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor-community/text-to-speech": "^8.0.2",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/preferences": "^8.0.1",
+    "@mediapipe/tasks-vision": "^1.1.1",
+    "axios": "^1.20.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
+  }
+}
