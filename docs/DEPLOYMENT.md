@@ -92,3 +92,14 @@ After that the physiotherapist creates patient accounts from **Patients → Add 
 - [ ] Physiotherapist account created and sees the dashboard
 - [ ] A patient's live session works on a phone over HTTPS (camera permission)
 - [ ] Supabase → Advisors → Security shows no "RLS disabled" warnings
+
+## Note on the PostgreSQL migrations (November 2026)
+
+`V3_1__row_level_security.sql` used to loop over every table, including Flyway's own
+`flyway_schema_history`, which Flyway locks while migrating; on a fresh PostgreSQL/Supabase
+database the migration waited forever. The loop now skips that table (its privileges are still
+revoked). Because the old version could never complete, no database has it recorded; if you
+did apply it some other way, run `flyway repair` once to accept the new checksum.
+`V4_1__row_level_security_new_tables.sql` applies the same lock-down to the tables added in V4.
+Verified on PostgreSQL 16: V1 → V4.1 apply on an empty database and Hibernate schema
+validation passes.

@@ -127,3 +127,57 @@ Other: `README.md`, `database/schema.sql` (now DB/user setup only), `docs/ARCHIT
 - Therapist/admin accounts are created via the seeder or the database; there is no admin UI.
 - Times are stored in UTC and shown in the browser's local time; server and clients are assumed to share a time zone for "today"/streak calculations.
 - No rate limiting on login; HTTPS must be provided by a reverse proxy in deployment.
+
+
+# Clinical workflow extension (November 2026)
+
+Details: [CLINICAL_WORKFLOW.md](CLINICAL_WORKFLOW.md).
+
+## Problems found in the audit and fixed
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | A patient could start a session for any exercise without a prescription | Sessions (and offline sync) require an approved prescription in force; staff can still practise |
+| 2 | Prescriptions were in force as soon as they were created | New PENDING_APPROVAL status; treating-therapist approval with readiness confirmation |
+| 3 | `postgresql/V3_1` deadlocked on Flyway's own history table (fresh DB hung forever) | Loop skips `flyway_schema_history`; V4_1 covers new tables |
+| 4 | No audit trail of clinical/administrative changes | `audit_logs`, written in the same transaction as each change |
+| 5 | Roles/accounts could only be changed in the database | Admin API + screens with guards (last admin, self-change, therapists with patients, patients with clinical history) |
+| 6 | Linking a patient by email was unaudited | Now audited (kept for compatibility; admins assign patients) |
+
+## Behaviour changes for existing users
+
+* Existing prescriptions are migrated as approved by their prescriber; existing patients keep
+  their program.
+* Patients no longer see "Start session" for exercises outside their approved program.
+* Paused prescriptions stay visible to the patient (status "Paused") instead of disappearing.
+* Admins land on the administration dashboard (the caseload dashboard stays at `/therapist/dashboard`).
+
+## Tests
+
+| Test | Result |
+|---|---|
+| Backend `mvn test` (H2 + Flyway + real security chain) | **26/26 passed** (16 existing, updated for the approval gate; 8 clinical-workflow integration tests; 2 YouTube URL tests) |
+| PostgreSQL 16 (local throwaway instance) | V1 → V4.1 applied on an empty database, Hibernate `validate` passed, demo seed and API smoke test OK, RLS enabled on 22/23 tables (all but Flyway's history table) |
+| Frontend `npm test` | **48/48 passed** (42 existing + 6 new) |
+| Frontend `npm run lint` | 0 errors; the 2 remaining warnings existed before this work |
+| Frontend production build | OK |
+| Browser walkthrough (headless Chromium, real backend + built frontend) | Admin creates accounts and assigns → patient assessment (impossible value blocked) → therapist correction + approval → prescription with targets beside baseline → patient blocked until approval → approval → patient log → 45.5 % progress shown → YouTube suggestion via notification → approval → patient resource → feedback → report + PDF → audit log → patient redirected from admin pages → 375 px phone width on 7 screens without horizontal scroll; no console errors or 5xx |
+
+Not tested: MySQL 8 (no MySQL server available here; the MySQL V4 migration mirrors the H2
+and PostgreSQL ones, which were both executed, and avoids MySQL's restriction on CHECK
+constraints over foreign-key columns with referential actions), the live YouTube oEmbed lookup
+(no internet from the test environment; it is disabled in tests and falls back gracefully),
+real video playback, and any mobile device.
+
+## Known limitations
+
+* Roles are fixed (ADMIN, THERAPIST, PATIENT); permissions are defined in code and shown
+  read-only to admins rather than being editable.
+* Only the most recently approved INITIAL assessment acts as the baseline; re-baselining means
+  approving a new INITIAL assessment that a therapist records (patients can only add follow-ups
+  once a baseline exists).
+* An APPROVED prescription becomes ACTIVE when first used on or after its start date, not by a
+  scheduler; dashboard counts of "in force" prescriptions include it only from then.
+* Notifications are polled every minute (no push/WebSocket delivery).
+* Progress percentages use the span of range measurements; asymmetric range goals (e.g. only
+  the minimum angle matters) need a single-value parameter instead.

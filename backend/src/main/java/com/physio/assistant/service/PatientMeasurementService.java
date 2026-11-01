@@ -84,7 +84,8 @@ public class PatientMeasurementService {
                 previousPeriod(patient.getId(), from, to),
                 sessions.stream().map(s -> toSessionPerformance(s, reportsBySession.get(s.getId()))).toList(),
                 findings(exercises, adherence),
-                LocalDateTime.now());
+                LocalDateTime.now(),
+                null);
     }
 
     static void validatePeriod(LocalDate from, LocalDate to) {

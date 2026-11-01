@@ -1,5 +1,6 @@
 import { ageFrom, formatCalendarDate, formatDateTime } from "../../lib/format";
 import MeasurementsView, { PeriodLabel } from "./MeasurementsView";
+import { RehabProgressView } from "../../components/clinical";
 
 const ASSESSMENT_SECTIONS = [
   ["observations", "Observations"],
@@ -32,6 +33,13 @@ export default function PatientReportDocument({ report, assessmentEditor, linkSe
           <Detail label="Rehabilitation period" value={<PeriodLabel period={period} />} />
         </div>
       </section>
+
+      {report.measurements.rehabProgress && (
+        <section className="stack" aria-labelledby="rehab-report-h">
+          <h2 id="rehab-report-h">Baseline, targets and latest performance (system-calculated)</h2>
+          <RehabProgressView data={report.measurements.rehabProgress} />
+        </section>
+      )}
 
       <MeasurementsView measurements={report.measurements} linkSessions={linkSessions} />
 

@@ -8,6 +8,7 @@ import { storage } from "../platform/storage";
 import { ErrorState, Spinner } from "../components/ui";
 import VoiceSettingsPanel from "../features/monitoring/VoiceSettingsPanel";
 import { useExerciseSession } from "../features/monitoring/useExerciseSession";
+import { useAuth } from "../context/AuthContext";
 
 // Phase strip shown during the exercise; each analyzer names its own phases (SETUP is not shown).
 const phasesOf = (analyzer) => Object.keys(analyzer?.PHASE_LABELS || {}).filter((p) => p !== "SETUP");
@@ -46,6 +47,7 @@ export default function LiveSession() {
   const [params] = useSearchParams();
   const assignmentId = params.get("assignment");
   const loaded = useApi(() => loadExercise(exerciseId, assignmentId), [exerciseId, assignmentId]);
+  const { user } = useAuth();
 
   if (loaded.loading) return <main className="page"><Spinner label="Loading exercise…" /></main>;
   if (loaded.error) return <main className="page"><ErrorState message={loaded.error} onRetry={loaded.reload} /></main>;
@@ -56,7 +58,20 @@ export default function LiveSession() {
       </main>
     );
   }
-  return <LiveSessionView exercise={loaded.data.exercise} assignment={loaded.data.assignment} />;
+  // Clinical safety: a patient may only perform a prescription their physiotherapist approved.
+  // The backend enforces the same rule when the session is registered.
+  const rx = loaded.data.assignment;
+  if (user?.role === "PATIENT" && (!rx || !rx.startable)) {
+    return (
+      <main className="page narrow">
+        <div className="alert warning">
+          {rx ? rx.startBlockedReason : "This exercise is not in your approved program."}{" "}
+          <Link to="/dashboard">Back to your program</Link>
+        </div>
+      </main>
+    );
+  }
+  return <LiveSessionView exercise={loaded.data.exercise} assignment={rx} />;
 }
 
 function LiveSessionView({ exercise, assignment }) {

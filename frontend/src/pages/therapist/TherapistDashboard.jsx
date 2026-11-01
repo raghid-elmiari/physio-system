@@ -24,6 +24,7 @@ export default function TherapistDashboard() {
         </div>
       </div>
 
+      <PendingReviews />
       {overview.loading && <Spinner label="Loading dashboard…" />}
       {overview.error && <ErrorState message={overview.error} onRetry={overview.reload} />}
       {overview.data && <DashboardContent data={overview.data} />}
@@ -167,5 +168,40 @@ function WeeklySessionsChart({ points }) {
         })}
       </svg>
     </div>
+  );
+}
+
+/** Work waiting for the physiotherapist: assessments to review and video suggestions. */
+function PendingReviews() {
+  const assessments = useApi(() => therapistApi.pendingAssessments(), []);
+  const videos = useApi(() => therapistApi.videoSubmissions("PENDING"), []);
+  const a = assessments.data || [];
+  const v = videos.data || [];
+  if (!assessments.data && !videos.data) return null;
+  if (a.length === 0 && v.length === 0) return null;
+  return (
+    <section className="card" style={{ marginBottom: 16 }} aria-labelledby="pending-h">
+      <div className="card-head"><h2 id="pending-h">Waiting for your review</h2><span className="badge warning">{a.length + v.length}</span></div>
+      <ul className="list">
+        {a.map((x) => (
+          <li key={`a${x.id}`} className="list-item">
+            <div className="main">
+              <div className="title">{x.patientName}: {x.type === "INITIAL" ? "initial assessment" : "follow-up assessment"}</div>
+              <div className="sub">{x.exerciseCount} exercise(s) · submitted {formatDateTime(x.submittedAt)}{x.flaggedMeasurements ? ` · ${x.flaggedMeasurements} value(s) to check` : ""}</div>
+            </div>
+            <Link className="btn sm" to={`/therapist/assessments/${x.id}`}>Review</Link>
+          </li>
+        ))}
+        {v.map((x) => (
+          <li key={`v${x.id}`} className="list-item">
+            <div className="main">
+              <div className="title">{x.patientName}: video suggestion</div>
+              <div className="sub">{x.title || x.youtubeVideoId} · {formatDateTime(x.createdAt)}</div>
+            </div>
+            <Link className="btn sm secondary" to={`/therapist/videos/${x.id}`}>Review</Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

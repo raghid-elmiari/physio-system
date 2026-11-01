@@ -39,12 +39,15 @@ public class TherapistService {
     private final AuthService authService;
     private final PatientAccessPolicy accessPolicy;
     private final PasswordEncoder passwordEncoder;
+    private final AuditService auditService;
+    private final NotificationService notificationService;
 
     public TherapistService(UserRepository userRepository, ExerciseAssignmentRepository assignmentRepository,
                             SessionRepository sessionRepository, TherapistNoteRepository noteRepository,
                             ExerciseService exerciseService, SessionService sessionService,
                             ProgressService progressService, AuthService authService,
-                            PatientAccessPolicy accessPolicy, PasswordEncoder passwordEncoder) {
+                            PatientAccessPolicy accessPolicy, PasswordEncoder passwordEncoder,
+                            AuditService auditService, NotificationService notificationService) {
         this.userRepository = userRepository;
         this.assignmentRepository = assignmentRepository;
         this.sessionRepository = sessionRepository;
@@ -55,6 +58,8 @@ public class TherapistService {
         this.authService = authService;
         this.accessPolicy = accessPolicy;
         this.passwordEncoder = passwordEncoder;
+        this.auditService = auditService;
+        this.notificationService = notificationService;
     }
 
     // ---------------------------------------------------------------- caseload & profiles
@@ -86,6 +91,8 @@ public class TherapistService {
             throw ApiException.conflict("This patient is already linked to another therapist");
         }
         patient.setTherapist(userRepository.getReferenceById(therapist.userId()));
+        auditService.record(therapist, "PATIENT_LINKED", "USER", patient.getId(), patient,
+                "Therapist linked patient " + patient.getFullName() + " to their caseload", null);
         return toSummary(patient);
     }
 
@@ -108,7 +115,10 @@ public class TherapistService {
         patient.setPrimaryCondition(blankToNull(request.primaryCondition()));
         patient.setRehabStatus(request.rehabStatus() == null
                 ? User.RehabStatus.ASSESSMENT : User.RehabStatus.valueOf(request.rehabStatus()));
-        return toSummary(userRepository.save(patient));
+        patient = userRepository.save(patient);
+        auditService.record(therapist, "PATIENT_CREATED", "USER", patient.getId(), patient,
+                "Created patient account " + patient.getFullName(), null);
+        return toSummary(patient);
     }
 
     @Transactional(readOnly = true)
@@ -133,8 +143,14 @@ public class TherapistService {
     public PatientSummary changeAccountStatus(AuthPrincipal therapist, Long patientId, AccountStatusRequest request) {
         User patient = accessPolicy.requireAccessiblePatient(therapist, patientId);
         User.Status newStatus = User.Status.valueOf(request.status());
+        User.Status previous = patient.getStatus();
         patient.setStatus(newStatus);
         if (newStatus == User.Status.DISABLED) authService.revokeAllSessions(patient.getId());
+        if (previous != newStatus) {
+            auditService.record(therapist, newStatus == User.Status.DISABLED ? "ACCOUNT_DEACTIVATED" : "ACCOUNT_ACTIVATED",
+                    "USER", patient.getId(), patient, "Account of " + patient.getFullName() + " set to " + newStatus,
+                    java.util.Map.of("from", previous.name(), "to", newStatus.name()));
+        }
         return toSummary(patient);
     }
 
@@ -162,25 +178,89 @@ public class TherapistService {
         return includeHistory ? exerciseService.prescriptionHistoryFor(patientId) : exerciseService.assignmentsFor(patientId);
     }
 
+    /** Prescribing never clears the patient to start: the prescription waits for the treating therapist's approval. */
     @Transactional
     public AssignmentResponse assign(AuthPrincipal therapist, Long patientId, CreateAssignmentRequest request) {
         User patient = accessPolicy.requireAccessiblePatient(therapist, patientId);
-        return exerciseService.createAssignment(patient, userRepository.getReferenceById(therapist.userId()), request);
+        ExerciseAssignment created = exerciseService.createAssignment(patient, userRepository.getReferenceById(therapist.userId()), request);
+        auditService.record(therapist, "PRESCRIPTION_CREATED", "PRESCRIPTION", created.getId(), patient,
+                "Prescribed " + created.getExercise().getName() + " (awaiting approval)", prescriptionDetails(created));
+        return exerciseService.toResponse(created);
     }
 
     @Transactional
     public AssignmentResponse revisePrescription(AuthPrincipal therapist, Long assignmentId, CreateAssignmentRequest request) {
         ExerciseAssignment current = requireAccessiblePrescription(therapist, assignmentId);
-        return exerciseService.revisePrescription(current, userRepository.getReferenceById(therapist.userId()), request);
+        boolean treating = accessPolicy.isTreatingTherapist(therapist, current.getPatient());
+        ExerciseAssignment revised = exerciseService.revisePrescription(current,
+                userRepository.getReferenceById(therapist.userId()), request, treating);
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("before", prescriptionDetails(current));
+        details.put("after", prescriptionDetails(revised));
+        if (revised.getChangeReason() != null) details.put("reason", revised.getChangeReason());
+        auditService.record(therapist, "PRESCRIPTION_REVISED", "PRESCRIPTION", revised.getId(), current.getPatient(),
+                "Revised " + revised.getExercise().getName() + " (version replaces #" + current.getId() + ")", details);
+        if (revised.isApproved()) {
+            notificationService.notify(current.getPatient(), NotificationService.PRESCRIPTION_CHANGED,
+                    "Your physiotherapist updated " + revised.getExercise().getName(),
+                    revised.getChangeReason(), "/dashboard", "PRESCRIPTION", revised.getId());
+        }
+        return exerciseService.toResponse(revised);
     }
 
+    /** Clinical clearance: only the patient's assigned physiotherapist may approve. */
+    @Transactional
+    public AssignmentResponse approvePrescription(AuthPrincipal therapist, Long assignmentId, ApprovePrescriptionRequest request) {
+        ExerciseAssignment prescription = requireAccessiblePrescription(therapist, assignmentId);
+        accessPolicy.requireTreatingTherapist(therapist, prescription.getPatient().getId());
+        if (!Boolean.TRUE.equals(request.readinessConfirmed())) {
+            throw ApiException.badRequest("Confirm that the patient is clinically ready for this exercise");
+        }
+        exerciseService.approve(prescription, userRepository.getReferenceById(therapist.userId()), request.note());
+        auditService.record(therapist, "PRESCRIPTION_APPROVED", "PRESCRIPTION", prescription.getId(), prescription.getPatient(),
+                "Approved " + prescription.getExercise().getName() + " (" + prescription.getStatus() + ")",
+                request.note() == null ? null : java.util.Map.of("note", request.note()));
+        notificationService.notify(prescription.getPatient(), NotificationService.PRESCRIPTION_APPROVED,
+                prescription.getExercise().getName() + " was approved by your physiotherapist",
+                prescription.getStatus() == ExerciseAssignment.Status.APPROVED && prescription.getStartDate() != null
+                        ? "You can start on " + prescription.getStartDate() + "." : "You can start this exercise now.",
+                "/dashboard", "PRESCRIPTION", prescription.getId());
+        return exerciseService.toResponse(prescription);
+    }
+
+    /**
+     * Pause, resume, complete or discontinue. Resuming only works for a paused (approved)
+     * prescription: this endpoint can never put an unapproved prescription in force.
+     */
     @Transactional
     public AssignmentResponse changePrescriptionStatus(AuthPrincipal therapist, Long assignmentId, AssignmentStatusRequest request) {
         ExerciseAssignment prescription = requireAccessiblePrescription(therapist, assignmentId);
-        if (prescription.getStatus() == ExerciseAssignment.Status.REPLACED) {
+        ExerciseAssignment.Status from = prescription.getStatus();
+        ExerciseAssignment.Status to = ExerciseAssignment.Status.valueOf(request.status());
+        if (from == ExerciseAssignment.Status.REPLACED) {
             throw ApiException.conflict("This prescription was replaced by a newer version; change that one instead");
         }
-        prescription.changeStatus(ExerciseAssignment.Status.valueOf(request.status()));
+        if (from == ExerciseAssignment.Status.COMPLETED || from == ExerciseAssignment.Status.DISCONTINUED) {
+            throw ApiException.conflict("This prescription has ended; prescribe the exercise again instead");
+        }
+        if (from == to) return exerciseService.toResponse(prescription);
+        switch (to) {
+            case ACTIVE -> {
+                if (from != ExerciseAssignment.Status.PAUSED || !prescription.isApproved()) {
+                    throw ApiException.conflict("Only a paused, approved prescription can be resumed; new prescriptions must be approved");
+                }
+                accessPolicy.requireTreatingTherapist(therapist, prescription.getPatient().getId());
+            }
+            case PAUSED -> {
+                if (from == ExerciseAssignment.Status.PENDING_APPROVAL) {
+                    throw ApiException.conflict("A prescription awaiting approval cannot be paused");
+                }
+            }
+            default -> { /* COMPLETED / DISCONTINUED allowed from any current status */ }
+        }
+        prescription.changeStatus(to);
+        auditService.record(therapist, "PRESCRIPTION_STATUS_CHANGED", "PRESCRIPTION", prescription.getId(), prescription.getPatient(),
+                prescription.getExercise().getName() + ": " + from + " → " + to, java.util.Map.of("from", from.name(), "to", to.name()));
         return exerciseService.toResponse(prescription);
     }
 
@@ -188,9 +268,35 @@ public class TherapistService {
     @Transactional
     public void deactivateAssignment(AuthPrincipal therapist, Long assignmentId) {
         ExerciseAssignment prescription = requireAccessiblePrescription(therapist, assignmentId);
-        if (prescription.getStatus() != ExerciseAssignment.Status.REPLACED) {
+        ExerciseAssignment.Status from = prescription.getStatus();
+        if (from != ExerciseAssignment.Status.REPLACED && from != ExerciseAssignment.Status.DISCONTINUED
+                && from != ExerciseAssignment.Status.COMPLETED) {
             prescription.changeStatus(ExerciseAssignment.Status.DISCONTINUED);
+            auditService.record(therapist, "PRESCRIPTION_STATUS_CHANGED", "PRESCRIPTION", prescription.getId(), prescription.getPatient(),
+                    prescription.getExercise().getName() + ": " + from + " → DISCONTINUED", java.util.Map.of("from", from.name(), "to", "DISCONTINUED"));
         }
+    }
+
+    private static java.util.Map<String, Object> prescriptionDetails(ExerciseAssignment a) {
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", a.getId());
+        m.put("exercise", a.getExercise().getName());
+        m.put("targetReps", a.getTargetReps());
+        m.put("setsPerSession", a.getSetsPerSession());
+        m.put("sessionsPerWeek", a.getSessionsPerWeek());
+        m.put("durationSeconds", a.getDurationSeconds());
+        m.put("difficulty", a.getDifficulty() == null ? null : a.getDifficulty().name());
+        m.put("status", a.getStatus().name());
+        m.put("targets", a.getTargets().stream().map(t -> {
+            java.util.Map<String, Object> tm = new java.util.LinkedHashMap<>();
+            tm.put("label", t.getLabel());
+            tm.put("value", t.getTargetValue());
+            tm.put("min", t.getTargetMin());
+            tm.put("max", t.getTargetMax());
+            tm.put("unit", t.getUnit());
+            return tm;
+        }).toList());
+        return m;
     }
 
     private ExerciseAssignment requireAccessiblePrescription(AuthPrincipal therapist, Long assignmentId) {

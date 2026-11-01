@@ -1,7 +1,7 @@
 // Lays out a stored patient report (ReportDtos.ReportResponse) as a PDF file.
 import { PdfDocument } from "../../lib/pdf/PdfDocument";
 import { formatCalendarDate, formatDateTime, formatDuration } from "../../lib/format";
-import { DIFFICULTY_LABELS, PRESCRIPTION_STATUS_LABELS, describeDose, formatMetric, formatPercent, metricLabel } from "../../lib/clinicalLabels";
+import { DIFFICULTY_LABELS, PRESCRIPTION_STATUS_LABELS, SOURCE_LABELS, SOURCE_SHORT, describeDose, formatMeasured, formatMetric, formatPercent, formatValue, metricLabel } from "../../lib/clinicalLabels";
 
 const MUTED = [91, 107, 130];
 
@@ -38,6 +38,8 @@ export function buildPatientReportPdf(report) {
       [2.2, 2.2, 1.9, 1, 1.3, 1.4]
     );
   }
+
+  if (m.rehabProgress) addRehabProgress(pdf, m.rehabProgress);
 
   const t = m.totals;
   pdf.heading("Exercise performance (system-generated)");
@@ -144,6 +146,41 @@ export function buildPatientReportPdf(report) {
   }
 
   return pdf.toBytes();
+}
+
+/** Baseline vs target vs latest; every value carries its source. */
+function addRehabProgress(pdf, r) {
+  pdf.heading("Baseline, targets and latest performance (system-calculated)");
+  pdf.keyValues([
+    ["Baseline approved", r.baselineApprovedAt ? formatDateTime(r.baselineApprovedAt) : "No approved baseline"],
+    ["Targets reached", `${r.targetsReached} of ${r.targetsTracked}`],
+    ["Average progress", r.averageProgressPct != null ? `${r.averageProgressPct}% of the gap closed` : "Not calculable"],
+    ["Measurement sources", r.sources.length ? r.sources.map((s) => SOURCE_LABELS[s] ?? s).join(", ") : "None"],
+  ], { columns: 2 });
+  const rows = [];
+  for (const rx of r.prescriptions) {
+    for (const p of rx.parameters) {
+      rows.push([
+        `${rx.exerciseName}\n${p.label}`,
+        p.baseline ? `${formatMeasured(p.baseline, p.unit)} (${SOURCE_SHORT[p.baseline.source]})` : "—",
+        p.targetComparable != null ? formatMeasured({ value: p.targetValue, valueMin: p.targetMin, valueMax: p.targetMax }, p.unit) : "—",
+        p.latest ? `${formatMeasured(p.latest, p.unit)} (${SOURCE_SHORT[p.latest.source]})` : "—",
+        p.remaining != null ? formatValue(p.remaining, p.unit) : "—",
+        p.progressPct != null ? `${p.progressPct}%` : p.progressNote || "—",
+      ]);
+    }
+  }
+  if (rows.length) {
+    pdf.table(["Exercise / measurement", "Baseline", "Target", "Latest", "Remaining", "Progress"], rows, [2.6, 1.5, 1.2, 1.5, 1, 1.8]);
+  } else {
+    pdf.paragraph("No targets or measured values in this period.", { color: MUTED });
+  }
+  const attention = r.prescriptions.flatMap((rx) => rx.attention.map((a) => `${rx.exerciseName}: ${a}`));
+  if (attention.length) {
+    pdf.paragraph("Requires attention", { bold: true });
+    pdf.bulletList(attention);
+  }
+  pdf.paragraph(r.disclaimer, { size: 8, color: MUTED });
 }
 
 export function downloadPatientReportPdf(report) {

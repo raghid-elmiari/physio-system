@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { offlineQueue, syncPendingSessions } from "../platform/sync";
+import NotificationBell from "./NotificationBell";
 
 const Icon = {
   home: <path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />,
@@ -10,6 +11,9 @@ const Icon = {
   progress: <path d="M4 19h16v2H4zM5 15l4-4 3 3 6-6 1.4 1.4L12 16.8l-3-3-2.6 2.6z" />,
   patients: <path d="M9 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm-7 9a7 7 0 0 1 14 0zm15-9a3 3 0 1 0 0-6v2a1 1 0 1 1 0 2zm1.5 9H22a5 5 0 0 0-4-4.9 8.9 8.9 0 0 1 .5 4.9z" />,
   profile: <path d="M12 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm-9 10a9 9 0 0 1 18 0z" />,
+  assessment: <path d="M9 2h6v2h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3zm0 4v1h6V6zm-1 5v2h8v-2zm0 4v2h5v-2z" />,
+  videos: <path d="M3 5h14a2 2 0 0 1 2 2v1.5l3-2v11l-3-2V17a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm5 3v8l6-4z" />,
+  users: <path d="M8 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm8 0a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM1 20a7 7 0 0 1 14 0zm15 0a8.6 8.6 0 0 0-2-5.3A5 5 0 0 1 23 20z" />,
 };
 
 function NavIcon({ name }) {
@@ -20,23 +24,38 @@ function NavIcon({ name }) {
   );
 }
 
+// `bottom: false` keeps an item out of the phone bottom bar (reachable from the header / pages).
 const PATIENT_NAV = [
   { to: "/dashboard", label: "Home", icon: "home" },
-  { to: "/exercises", label: "Exercises", icon: "exercises" },
-  { to: "/history", label: "History", icon: "history" },
+  { to: "/assessment", label: "Assessment", icon: "assessment" },
+  { to: "/exercises", label: "Exercises", icon: "exercises", bottom: false },
+  { to: "/history", label: "History", icon: "history", bottom: false },
   { to: "/progress", label: "Progress", icon: "progress" },
+  { to: "/videos", label: "Videos", icon: "videos" },
   { to: "/profile", label: "Profile", icon: "profile" },
 ];
 
-const STAFF_NAV = [
+const THERAPIST_NAV = [
   { to: "/dashboard", label: "Dashboard", icon: "home" },
   { to: "/patients", label: "Patients", icon: "patients" },
-  { to: "/exercises", label: "Exercises", icon: "exercises" },
+  { to: "/therapist/videos", label: "Videos", icon: "videos" },
+  { to: "/therapist/library", label: "Library", icon: "exercises" },
+  { to: "/profile", label: "Profile", icon: "profile" },
+];
+
+const ADMIN_NAV = [
+  { to: "/dashboard", label: "Dashboard", icon: "home" },
+  { to: "/admin/users", label: "Users", icon: "users" },
+  { to: "/admin/assignments", label: "Assignments", icon: "patients" },
+  { to: "/admin/activity", label: "Activity", icon: "history" },
+  { to: "/patients", label: "Patients", icon: "patients", bottom: false },
+  { to: "/therapist/library", label: "Library", icon: "exercises", bottom: false },
   { to: "/profile", label: "Profile", icon: "profile" },
 ];
 
 function navItems(role) {
-  return role === "THERAPIST" || role === "ADMIN" ? STAFF_NAV : PATIENT_NAV;
+  if (role === "ADMIN") return ADMIN_NAV;
+  return role === "THERAPIST" ? THERAPIST_NAV : PATIENT_NAV;
 }
 
 /** Upload sessions recorded offline whenever we come back online. */
@@ -75,6 +94,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="header-user">
+          <NotificationBell />
           {pending > 0 && <span className="badge warning" title="Sessions waiting to upload">{pending} unsynced</span>}
           <NavLink to="/profile" className="name">
             {user?.firstName}
@@ -86,7 +106,7 @@ export default function Layout() {
       </header>
       <Outlet />
       <nav className="bottom-nav no-print" aria-label="Main">
-        {items.map((i) => (
+        {items.filter((i) => i.bottom !== false).map((i) => (
           <NavLink key={i.to} to={i.to}>
             <NavIcon name={i.icon} />
             {i.label}

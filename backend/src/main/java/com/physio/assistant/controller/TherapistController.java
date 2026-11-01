@@ -148,6 +148,13 @@ public class TherapistController {
         return therapistService.revisePrescription(CurrentUser.of(auth), assignmentId, request);
     }
 
+    /** Clinical approval by the patient's assigned physiotherapist; puts the prescription in force. */
+    @PostMapping("/assignments/{assignmentId}/approve")
+    public AssignmentResponse approvePrescription(Authentication auth, @PathVariable Long assignmentId,
+                                                  @Valid @RequestBody ApprovePrescriptionRequest request) {
+        return therapistService.approvePrescription(CurrentUser.of(auth), assignmentId, request);
+    }
+
     /** Pause, resume, complete or discontinue a prescription. */
     @PutMapping("/assignments/{assignmentId}/status")
     public AssignmentResponse changePrescriptionStatus(Authentication auth, @PathVariable Long assignmentId,

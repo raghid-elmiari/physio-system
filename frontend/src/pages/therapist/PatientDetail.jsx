@@ -8,11 +8,18 @@ import PatientOverviewPanel from "../../features/patients/PatientOverviewPanel";
 import PrescriptionPanel from "../../features/patients/PrescriptionPanel";
 import PerformancePanel from "../../features/patients/PerformancePanel";
 import ReportsPanel from "../../features/patients/ReportsPanel";
+import AssessmentsPanel from "../../features/patients/AssessmentsPanel";
+import RehabPanel from "../../features/patients/RehabPanel";
+import VideosPanel from "../../features/patients/VideosPanel";
+import { useAuth } from "../../context/AuthContext";
 
 const TABS = [
   ["overview", "Overview"],
+  ["assessments", "Assessments"],
   ["program", "Exercise program"],
-  ["performance", "Performance"],
+  ["progress", "Progress & targets"],
+  ["performance", "Camera sessions"],
+  ["videos", "Videos"],
   ["reports", "Reports"],
 ];
 
@@ -21,6 +28,9 @@ export default function PatientDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = TABS.some(([key]) => key === searchParams.get("tab")) ? searchParams.get("tab") : "overview";
   const patient = useApi(() => therapistApi.patient(patientId), [patientId]);
+  const { user } = useAuth();
+  // Therapists only ever see their own patients; administrators can view but not make clinical decisions.
+  const canDecide = user?.role === "THERAPIST";
 
   if (patient.loading && !patient.data) return <main className="page"><Spinner /></main>;
   if (patient.error) return <main className="page"><ErrorState message={patient.error} onRetry={patient.reload} /></main>;
@@ -59,7 +69,10 @@ export default function PatientDetail() {
       </nav>
 
       {activeTab === "overview" && <PatientOverviewPanel patient={p} onPatientChanged={patient.reload} />}
-      {activeTab === "program" && <PrescriptionPanel patientId={p.id} onProgramChanged={patient.reload} />}
+      {activeTab === "assessments" && <AssessmentsPanel patientId={p.id} canDecide={canDecide} />}
+      {activeTab === "program" && <PrescriptionPanel patientId={p.id} onProgramChanged={patient.reload} canDecide={canDecide} />}
+      {activeTab === "progress" && <RehabPanel patientId={p.id} />}
+      {activeTab === "videos" && <VideosPanel patientId={p.id} canDecide={canDecide} />}
       {activeTab === "performance" && <PerformancePanel patientId={p.id} />}
       {activeTab === "reports" && <ReportsPanel patientId={p.id} />}
     </main>

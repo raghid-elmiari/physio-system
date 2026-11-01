@@ -52,14 +52,37 @@ public class Exercise {
     @Column(name = "analysis_config_json", columnDefinition = "JSON")
     private String analysisConfigJson;
 
+    /** false = archived: hidden from the library and cannot be newly prescribed; existing prescriptions keep it. */
     @Column(nullable = false)
     private boolean active = true;
+
+    @Column(length = 50)
+    private String category;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "difficulty_level", length = 20)
+    private ExerciseAssignment.Difficulty difficultyLevel;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_id")
+    private User createdBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @Column(name = "archived_at")
+    private LocalDateTime archivedAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }

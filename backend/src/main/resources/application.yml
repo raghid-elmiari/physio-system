@@ -44,6 +44,9 @@ app:
     offline-timeout-seconds: 30   # heartbeat gap after which a device is considered OFFLINE
   sessions:
     stale-after-hours: ${SESSION_STALE_AFTER_HOURS:6}   # IN_PROGRESS sessions older than this are marked ABORTED
+  youtube:
+    # Title/channel lookup through YouTube's public oEmbed endpoint (no API key). Set false to disable.
+    metadata-enabled: ${YOUTUBE_METADATA_ENABLED:true}
   seed:
     demo-data: ${SEED_DEMO_DATA:false}
     demo-password: ${DEMO_USER_PASSWORD:}

@@ -32,15 +32,19 @@ public class PatientReportService {
     private final PatientMeasurementService measurementService;
     private final PatientAccessPolicy accessPolicy;
     private final ObjectMapper objectMapper;
+    private final RehabProgressService rehabProgressService;
+    private final AuditService auditService;
 
     public PatientReportService(PatientReportRepository reportRepository, UserRepository userRepository,
                                 PatientMeasurementService measurementService, PatientAccessPolicy accessPolicy,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper, RehabProgressService rehabProgressService, AuditService auditService) {
         this.reportRepository = reportRepository;
         this.userRepository = userRepository;
         this.measurementService = measurementService;
         this.accessPolicy = accessPolicy;
         this.objectMapper = objectMapper;
+        this.rehabProgressService = rehabProgressService;
+        this.auditService = auditService;
     }
 
     // ---------------------------------------------------------------- physiotherapist
@@ -58,7 +62,8 @@ public class PatientReportService {
         if (request.to().isAfter(LocalDate.now())) {
             throw ApiException.badRequest("A report cannot end in the future");
         }
-        PatientMeasurements measurements = measurementService.measure(patient, request.from(), request.to());
+        PatientMeasurements measurements = measurementService.measure(patient, request.from(), request.to())
+                .withRehabProgress(rehabProgressService.compute(patient, request.from(), request.to()));
 
         PatientReport report = new PatientReport();
         report.setPatient(patient);
@@ -68,7 +73,10 @@ public class PatientReportService {
         report.setPeriodStart(request.from());
         report.setPeriodEnd(request.to());
         report.setMeasurementsJson(toJson(measurements));
-        return toResponse(reportRepository.save(report));
+        report = reportRepository.save(report);
+        auditService.record(therapist, "REPORT_GENERATED", "REPORT", report.getId(), patient,
+                "Generated report \"" + report.getTitle() + "\"", null);
+        return toResponse(report);
     }
 
     @Transactional(readOnly = true)
@@ -91,13 +99,20 @@ public class PatientReportService {
         report.setRecommendations(trimToNull(request.recommendations()));
         report.setExerciseModifications(trimToNull(request.exerciseModifications()));
         report.setFollowUpInstructions(trimToNull(request.followUpInstructions()));
+        boolean wasShared = report.isSharedWithPatient();
         if (request.sharedWithPatient() != null) report.setSharedWithPatient(request.sharedWithPatient());
+        auditService.record(therapist, "REPORT_UPDATED", "REPORT", report.getId(), report.getPatient(),
+                "Updated report \"" + report.getTitle() + "\"" + (wasShared != report.isSharedWithPatient()
+                        ? (report.isSharedWithPatient() ? " and shared it with the patient" : " and stopped sharing it") : ""), null);
         return toResponse(report);
     }
 
     @Transactional
     public void deleteReport(AuthPrincipal therapist, Long reportId) {
-        reportRepository.delete(requireAccessibleReport(therapist, reportId));
+        PatientReport report = requireAccessibleReport(therapist, reportId);
+        auditService.record(therapist, "REPORT_DELETED", "REPORT", report.getId(), report.getPatient(),
+                "Deleted report \"" + report.getTitle() + "\"", null);
+        reportRepository.delete(report);
     }
 
     private PatientReport requireAccessibleReport(AuthPrincipal therapist, Long reportId) {

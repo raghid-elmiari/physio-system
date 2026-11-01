@@ -12,3 +12,5 @@ app:
     secret: test-secret-that-is-definitely-longer-than-32-bytes-long
   seed:
     demo-data: false
+  youtube:
+    metadata-enabled: false   # no network in tests

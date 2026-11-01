@@ -22,6 +22,8 @@ export default function ExerciseDetail() {
   const analyzer = getAnalyzer(e.analyzerKey);
   const steps = (e.instructions || "").split("\n").map((s) => s.trim()).filter(Boolean);
   const startUrl = `/session/live/${e.id}${assignmentId ? `?assignment=${assignmentId}` : ""}`;
+  // Patients start from their approved program (the live page re-checks approval); staff may try any exercise.
+  const canStart = analyzer && (isTherapist || assignmentId);
 
   return (
     <main className="page">
@@ -39,7 +41,7 @@ export default function ExerciseDetail() {
           {isTherapist && e.analyzerKey === "reference_dtw" && (
             <Link className="btn secondary" to={`/therapist/exercises/${e.id}/reference`}>Replace reference video</Link>
           )}
-          {analyzer && <Link className="btn lg" to={startUrl}>Start session</Link>}
+          {canStart && <Link className="btn lg" to={startUrl}>Start session</Link>}
         </div>
       </div>
 

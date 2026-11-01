@@ -1,9 +1,15 @@
 import { Link } from "react-router-dom";
-import { DIFFICULTY_LABELS } from "../lib/clinicalLabels";
+import { DIFFICULTY_LABELS, formatMeasured } from "../lib/clinicalLabels";
+import { useAuth } from "../context/AuthContext";
+import { PrescriptionStatusBadge } from "./clinical";
 import { formatCalendarDate, toIsoDate } from "../lib/format";
 
 /** Card for an exercise, optionally as part of a therapist assignment. */
 export default function ExerciseCard({ exercise, assignment }) {
+  const { user } = useAuth();
+  const isPatient = user?.role === "PATIENT";
+  // Patients can only perform approved prescriptions; staff may try any exercise.
+  const canPerform = isPatient ? !!assignment?.startable : true;
   const reps = assignment?.targetReps ?? exercise.defaultReps;
   const weekly = assignment?.sessionsPerWeek;
   const done = assignment?.completedSessionsLast7Days ?? 0;
@@ -17,6 +23,7 @@ export default function ExerciseCard({ exercise, assignment }) {
         <span className="spacer" />
         {exercise.cameraMonitoringSupported ? <span className="badge primary">Camera coach</span> : <span className="badge">No camera analysis yet</span>}
       </div>
+      {assignment && <div className="row"><PrescriptionStatusBadge status={assignment.status} />{assignment.startBlockedReason && <span className="small muted">{assignment.startBlockedReason}</span>}</div>}
       <div className="meta">
         {exercise.bodyRegion && <span className="badge">{exercise.bodyRegion}</span>}
         <span className="badge">{reps} reps{assignment?.setsPerSession > 1 ? ` × ${assignment.setsPerSession} sets` : ""}</span>
@@ -33,10 +40,20 @@ export default function ExerciseCard({ exercise, assignment }) {
       )}
       {exercise.description && <p>{exercise.description}</p>}
       {assignment?.notes && <p className="small"><strong>Your physiotherapist&apos;s instructions:</strong> {assignment.notes}</p>}
+      {assignment?.safetyInstructions && <p className="small warning-text"><strong>Safety:</strong> {assignment.safetyInstructions}</p>}
+      {assignment?.targets?.length > 0 && (
+        <p className="small"><strong>Targets:</strong> {assignment.targets.map((t) => `${t.label} ${formatMeasured(t, t.unit)}`).join(" · ")}</p>
+      )}
+      {isPatient && !assignment && <p className="small muted">Not in your program. Your physiotherapist decides which exercises you do.</p>}
       <div className="actions">
-        {exercise.cameraMonitoringSupported && (
+        {exercise.cameraMonitoringSupported && canPerform && (
           <Link className="btn" to={startUrl}>
             Start session
+          </Link>
+        )}
+        {isPatient && assignment?.startable && (
+          <Link className={`btn ${exercise.cameraMonitoringSupported ? "secondary" : ""}`} to={`/program/${assignment.id}/log`}>
+            Log performance
           </Link>
         )}
         <Link className="btn secondary" to={`/exercises/${exercise.id}${assignment ? `?assignment=${assignment.id}` : ""}`}>

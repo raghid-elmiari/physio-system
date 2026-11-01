@@ -15,7 +15,10 @@ DO $$
 DECLARE
     tbl record;
 BEGIN
-    FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = current_schema() LOOP
+    -- flyway_schema_history is excluded: Flyway holds a lock on it while migrating, so altering
+    -- it here would wait forever. Its privileges are still revoked below.
+    FOR tbl IN SELECT tablename FROM pg_tables
+               WHERE schemaname = current_schema() AND tablename <> 'flyway_schema_history' LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl.tablename);
     END LOOP;
 

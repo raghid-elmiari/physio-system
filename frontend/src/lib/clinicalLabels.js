@@ -16,6 +16,8 @@ export const REHAB_STATUS_TONES = {
 };
 
 export const PRESCRIPTION_STATUS_LABELS = {
+  PENDING_APPROVAL: "Awaiting approval",
+  APPROVED: "Approved, starts later",
   ACTIVE: "Active",
   PAUSED: "Paused",
   DISCONTINUED: "Discontinued",
@@ -24,6 +26,8 @@ export const PRESCRIPTION_STATUS_LABELS = {
 };
 
 export const PRESCRIPTION_STATUS_TONES = {
+  PENDING_APPROVAL: "warning",
+  APPROVED: "primary",
   ACTIVE: "success",
   PAUSED: "warning",
   DISCONTINUED: "danger",
@@ -72,4 +76,81 @@ export function describeDose(prescription) {
   if (prescription.durationSeconds) parts.push(`${prescription.durationSeconds} s hold`);
   if (prescription.restSeconds) parts.push(`${prescription.restSeconds} s rest`);
   return parts.join(" · ");
+}
+
+export const ASSESSMENT_STATUS_LABELS = {
+  NOT_STARTED: "Not started",
+  IN_PROGRESS: "Draft",
+  SUBMITTED: "Submitted (waiting for a therapist)",
+  PENDING_REVIEW: "Waiting for review",
+  APPROVED: "Approved",
+  REVISION_REQUESTED: "Revision requested",
+};
+
+export const ASSESSMENT_STATUS_TONES = {
+  NOT_STARTED: "",
+  IN_PROGRESS: "",
+  SUBMITTED: "primary",
+  PENDING_REVIEW: "primary",
+  APPROVED: "success",
+  REVISION_REQUESTED: "warning",
+};
+
+export const ASSESSMENT_TYPE_LABELS = { INITIAL: "Initial (baseline)", FOLLOW_UP: "Follow-up" };
+
+export const VIDEO_STATUS_LABELS = {
+  PENDING: "Pending approval",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  REVISION_REQUESTED: "Revision requested",
+};
+
+export const VIDEO_STATUS_TONES = { PENDING: "primary", APPROVED: "success", REJECTED: "danger", REVISION_REQUESTED: "warning" };
+
+export const SOURCE_LABELS = {
+  PATIENT_REPORTED: "Patient-reported",
+  THERAPIST_MEASURED: "Therapist-measured",
+  COMPUTER_VISION: "Computer vision (automated, not validated)",
+};
+
+export const SOURCE_SHORT = { PATIENT_REPORTED: "Patient", THERAPIST_MEASURED: "Therapist", COMPUTER_VISION: "Camera (auto)" };
+
+export const SOURCE_TONES = { PATIENT_REPORTED: "", THERAPIST_MEASURED: "primary", COMPUTER_VISION: "warning" };
+
+export const MEASUREMENT_TYPES = {
+  ANGLE: { label: "Angle", unit: "deg" },
+  FLEXIBILITY: { label: "Flexibility", unit: "cm" },
+  REPETITIONS: { label: "Repetitions", unit: "count" },
+  DURATION: { label: "Duration", unit: "s" },
+  DISTANCE: { label: "Distance", unit: "m" },
+  PAIN: { label: "Pain", unit: "0-10" },
+  CUSTOM: { label: "Custom", unit: "" },
+};
+
+export const ROLE_LABELS = { PATIENT: "Patient", THERAPIST: "Physiotherapist", ADMIN: "Administrator" };
+
+const UNIT_SUFFIX = { deg: "°", count: "", s: " s", cm: " cm", m: " m" };
+
+/** "65°", "12", "30 s" */
+export function formatValue(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const n = Math.round(Number(value) * 10) / 10;
+  return `${n}${UNIT_SUFFIX[unit] ?? (unit ? ` ${unit}` : "")}`;
+}
+
+/** A measured value or range: "0°–65°" or "12". Accepts measurement or target-like objects. */
+export function formatMeasured(m, unit = m?.unit) {
+  if (!m) return "—";
+  const value = m.value ?? m.targetValue;
+  const min = m.valueMin ?? m.targetMin;
+  const max = m.valueMax ?? m.targetMax;
+  if (value != null) return formatValue(value, unit);
+  if (min != null || max != null) return `${formatValue(min, unit)}–${formatValue(max, unit)}`;
+  return "—";
+}
+
+/** "Expected 0°–120°" for a parameter with a normal range. */
+export function formatExpected(p, unit = p?.unit) {
+  if (p?.normalMin == null && p?.normalMax == null) return null;
+  return `${p.normalMin != null ? formatValue(p.normalMin, unit) : "…"}–${p.normalMax != null ? formatValue(p.normalMax, unit) : "…"}`;
 }

@@ -22,7 +22,8 @@ Video never leaves the device; only derived metrics (reps, errors, angles, timin
 [docs/IMPLEMENTATION_NOTES.md](docs/IMPLEMENTATION_NOTES.md) (what changed, test results, limitations) ·
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (original design notes) ·
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (Vercel + Supabase + Render) ·
-[docs/PHYSIOTHERAPIST_DASHBOARD.md](docs/PHYSIOTHERAPIST_DASHBOARD.md) (admin dashboard, prescriptions, reports)
+[docs/PHYSIOTHERAPIST_DASHBOARD.md](docs/PHYSIOTHERAPIST_DASHBOARD.md) (physiotherapist dashboard, prescriptions, reports) ·
+[docs/CLINICAL_WORKFLOW.md](docs/CLINICAL_WORKFLOW.md) (admin, assessments/baselines, targets and approval, performance, progress comparison, YouTube videos, notifications, audit)
 
 > The exercise thresholds are an engineering starting point, **not clinically validated**.
 > Have a physiotherapist calibrate them before patients rely on the feedback.
@@ -100,17 +101,21 @@ Open http://localhost:5173 and sign in:
 
 | Account | Email | Password |
 |---|---|---|
-| Patient (has an assigned Shoulder Raise program) | `patient@demo.local` | value of `DEMO_USER_PASSWORD` |
+| Patient (has an approved Shoulder Raise program) | `patient@demo.local` | value of `DEMO_USER_PASSWORD` |
 | Therapist (linked to that patient) | `therapist@demo.local` | value of `DEMO_USER_PASSWORD` |
+| Administrator | `admin@demo.local` | value of `DEMO_USER_PASSWORD` |
 
-Or register a new patient account. Therapist/admin accounts are not self-service; create
-one by changing `role` in the `users` table, or use the seeded therapist. The therapist
-lands on the **physiotherapist dashboard** (caseload overview) and manages patients,
-prescriptions, performance and reports under **Patients**.
+Or register a new patient account. Therapist and admin accounts are not self-service: the
+administrator creates them under **Users** (or use the seeded accounts). The administrator
+assigns each patient to a physiotherapist under **Assignments**. The therapist lands on the
+**physiotherapist dashboard** and manages assessments, prescriptions (with personal targets and
+an explicit approval step), progress, videos and reports under **Patients**. See
+[docs/CLINICAL_WORKFLOW.md](docs/CLINICAL_WORKFLOW.md) for the full workflow.
 
 ## 6. Run a monitored exercise (computer vision + voice)
 
-1. Sign in as the patient → **Start session** on *Shoulder Raise*.
+1. Sign in as the patient → **Start session** on *Shoulder Raise* (patients can only start
+   exercises their physiotherapist has prescribed and approved).
 2. **Enable camera** → allow camera access. The pose model loads and warms up (a few seconds the first time).
 3. Stand 2–3 m from the camera with head, both hands and hips visible → **Start exercise**.
 4. Raise both straight arms sideways to shoulder height, hold ~1 s, lower slowly. Try a mistake
@@ -149,8 +154,8 @@ Only joint-angle curves are saved, never the video.
 ## 7. Tests
 
 ```bash
-cd backend && mvn test             # 16 API integration tests (H2, full security chain, Flyway)
-cd frontend && npm test            # 42 unit tests: evaluators, DTW + reference matching, voice loop, recorder, offline queue
+cd backend && mvn test             # 26 tests: API integration (H2, full security chain, Flyway) incl. clinical workflow + RBAC, YouTube URL parsing
+cd frontend && npm test            # 48 unit tests: evaluators, DTW + reference matching, voice loop, recorder, offline queue, YouTube links, measurements
 cd frontend && npm run lint        # oxlint
 cd frontend && npm run build       # production build
 ```
@@ -176,7 +181,7 @@ curl -s "$B/progress?days=30" -H "Authorization: Bearer $TOKEN"
 | `POST /api/auth/register` · `login` · `refresh` · `logout` | public | account, tokens (refresh tokens rotate; reuse revokes all) |
 | `GET/PUT /api/users/me`, `PUT /api/users/me/password` | user | profile, password change (signs out other devices) |
 | `GET /api/exercises`, `GET /api/exercises/{id}` | user | catalog incl. instructions + `analysisConfig` thresholds |
-| `GET /api/assignments` | patient | the patient's active program |
+| `GET /api/assignments` | patient | the patient's program, each with status and whether it can be started |
 | `POST /api/sessions` | patient | start (idempotent on `clientSessionId`) |
 | `POST /api/sessions/{id}/complete` | owner | on-device summary + events → report (idempotent) |
 | `POST /api/sessions/{id}/abort` | owner | interrupted session |
@@ -192,6 +197,7 @@ curl -s "$B/progress?days=30" -H "Authorization: Bearer $TOKEN"
 | `GET/POST .../patients/{id}/reports`, `GET/PUT/DELETE /api/therapist/reports/{id}` | therapist | stored reports + professional assessment + sharing |
 | `GET /api/reports`, `GET /api/reports/{id}` | patient | reports shared with the signed-in patient |
 | `POST /api/admin/devices`, `/api/device/**`, `/ws` | admin / edge device | original UNO Q edge-device flow |
+| `/api/admin/**`, `/api/patient/**`, `/api/notifications/**`, new `/api/therapist/**` endpoints | admin / patient / any / therapist | clinical workflow: see [docs/CLINICAL_WORKFLOW.md](docs/CLINICAL_WORKFLOW.md#api) |
 | `GET /api/health` | public | liveness |
 
 Errors always look like `{timestamp, status, error, message, path[, fieldErrors]}`; 401 =

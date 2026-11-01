@@ -28,6 +28,7 @@ public class DemoDataSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(DemoDataSeeder.class);
     static final String THERAPIST_EMAIL = "therapist@demo.local";
     static final String PATIENT_EMAIL = "patient@demo.local";
+    static final String ADMIN_EMAIL = "admin@demo.local";
 
     private final UserRepository userRepository;
     private final ExerciseRepository exerciseRepository;
@@ -52,6 +53,10 @@ public class DemoDataSeeder implements ApplicationRunner {
             log.warn("SEED_DEMO_DATA=true but DEMO_USER_PASSWORD is missing or shorter than 8 characters; skipping demo seed.");
             return;
         }
+        if (!userRepository.existsByEmailIgnoreCase(ADMIN_EMAIL)) {
+            userRepository.save(user("Alex", "Admin", ADMIN_EMAIL, User.Role.ADMIN));
+            log.info("Seeded demo administrator {} (password from DEMO_USER_PASSWORD).", ADMIN_EMAIL);
+        }
         if (userRepository.existsByEmailIgnoreCase(PATIENT_EMAIL)) return;
 
         User therapist = userRepository.findByEmailIgnoreCase(THERAPIST_EMAIL)
@@ -74,6 +79,12 @@ public class DemoDataSeeder implements ApplicationRunner {
             prescription.setDifficulty(ExerciseAssignment.Difficulty.EASY);
             prescription.setStartDate(java.time.LocalDate.now());
             prescription.setNotes("Move slowly and stop if you feel sharp pain.");
+            prescription.setInstructions(shoulderRaise.getInstructions());
+            // Demo program is in force from the start (approved by the demo therapist).
+            prescription.changeStatus(ExerciseAssignment.Status.ACTIVE);
+            prescription.setApprovedBy(therapist);
+            prescription.setApprovedAt(java.time.LocalDateTime.now());
+            prescription.setApprovalNote("Demo data");
             assignmentRepository.save(prescription);
         }
         log.info("Seeded demo accounts {} and {} (password from DEMO_USER_PASSWORD).", THERAPIST_EMAIL, PATIENT_EMAIL);

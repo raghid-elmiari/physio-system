@@ -17,4 +17,12 @@ public interface ExerciseAssignmentRepository extends JpaRepository<ExerciseAssi
 
     @EntityGraph(attributePaths = {"exercise", "patient"})
     List<ExerciseAssignment> findByPatientIdIn(Collection<Long> patientIds);
+
+    @EntityGraph(attributePaths = {"exercise", "assignedBy"})
+    List<ExerciseAssignment> findByPatientIdAndStatusInOrderByCreatedAtDesc(Long patientId, Collection<ExerciseAssignment.Status> statuses);
+
+    @EntityGraph(attributePaths = {"exercise", "patient"})
+    List<ExerciseAssignment> findByPatientIdInAndStatus(Collection<Long> patientIds, ExerciseAssignment.Status status);
+
+    long countByPatientIdAndStatusIn(Long patientId, Collection<ExerciseAssignment.Status> statuses);
 }

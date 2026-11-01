@@ -144,9 +144,29 @@ class TherapistDashboardIntegrationTest {
         JsonNode prescription = read(call(post("/api/therapist/patients/" + patientId + "/assignments"), therapistToken,
                 prescriptionBody(10, 3, 4)).andExpect(status().isCreated()));
         long firstId = prescription.get("id").asLong();
-        assertThat(prescription.get("status").asText()).isEqualTo("ACTIVE");
+        // Prescribing is not clinical clearance: it waits for the therapist's approval.
+        assertThat(prescription.get("status").asText()).isEqualTo("PENDING_APPROVAL");
+        assertThat(prescription.get("startable").asBoolean()).isFalse();
         assertThat(prescription.get("restSeconds").asInt()).isEqualTo(45);
         assertThat(prescription.get("difficulty").asText()).isEqualTo("MODERATE");
+
+        // The patient sees it, with its status, but cannot start it yet.
+        JsonNode pending = read(call(get("/api/assignments"), patientToken, null));
+        assertThat(pending).hasSize(1);
+        assertThat(pending.get(0).get("status").asText()).isEqualTo("PENDING_APPROVAL");
+        assertThat(pending.get(0).get("startBlockedReason").asText()).contains("approve");
+        // A paused/ended state cannot be reached before approval, and "resume" cannot bypass it.
+        call(put("/api/therapist/assignments/" + firstId + "/status"), therapistToken, Map.of("status", "ACTIVE"))
+                .andExpect(status().isConflict());
+        call(post("/api/therapist/assignments/" + firstId + "/approve"), therapistToken, Map.of("readinessConfirmed", false))
+                .andExpect(status().isBadRequest());
+        call(post("/api/therapist/assignments/" + firstId + "/approve"), therapistToken, Map.of("readinessConfirmed", true, "note", "ROM adequate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.startable").value(true))
+                .andExpect(jsonPath("$.approvalNote").value("ROM adequate"));
+        call(post("/api/therapist/assignments/" + firstId + "/approve"), therapistToken, Map.of("readinessConfirmed", true))
+                .andExpect(status().isConflict());
 
         // The prescription appears on the patient's dashboard with every field.
         JsonNode program = read(call(get("/api/assignments"), patientToken, null));
@@ -159,6 +179,8 @@ class TherapistDashboardIntegrationTest {
                 .andExpect(status().isOk()));
         long revisedId = revised.get("id").asLong();
         assertThat(revised.get("previousAssignmentId").asLong()).isEqualTo(firstId);
+        // Revised by the treating therapist: that is the authorisation, so it stays in force.
+        assertThat(revised.get("status").asText()).isEqualTo("ACTIVE");
         assertThat(read(call(get("/api/assignments"), patientToken, null)).get(0).get("targetReps").asInt()).isEqualTo(12);
 
         JsonNode history = read(call(get("/api/therapist/patients/" + patientId + "/assignments?includeHistory=true"), therapistToken, null));
@@ -166,12 +188,17 @@ class TherapistDashboardIntegrationTest {
         assertThat(statusOf(history, firstId)).isEqualTo("REPLACED");
         call(put("/api/therapist/assignments/" + firstId), therapistToken, prescriptionBody(8, 1, 3)).andExpect(status().isConflict());
 
-        // Pause hides it from the patient; resume brings it back; discontinue ends it.
+        // Pause keeps it visible to the patient as paused (not startable); resume; discontinue ends it.
         call(put("/api/therapist/assignments/" + revisedId + "/status"), therapistToken, Map.of("status", "PAUSED"))
                 .andExpect(jsonPath("$.status").value("PAUSED"));
-        assertThat(read(call(get("/api/assignments"), patientToken, null))).isEmpty();
-        call(put("/api/therapist/assignments/" + revisedId + "/status"), therapistToken, Map.of("status", "ACTIVE"));
-        assertThat(read(call(get("/api/assignments"), patientToken, null))).hasSize(1);
+        JsonNode paused = read(call(get("/api/assignments"), patientToken, null));
+        assertThat(paused).hasSize(1);
+        assertThat(paused.get(0).get("startable").asBoolean()).isFalse();
+        call(post("/api/sessions"), patientToken, Map.of("exerciseId", shoulderRaiseId, "assignmentId", revisedId))
+                .andExpect(status().isConflict());
+        call(put("/api/therapist/assignments/" + revisedId + "/status"), therapistToken, Map.of("status", "ACTIVE"))
+                .andExpect(status().isOk());
+        assertThat(read(call(get("/api/assignments"), patientToken, null)).get(0).get("status").asText()).isEqualTo("ACTIVE");
         call(delete("/api/therapist/assignments/" + revisedId), therapistToken, null).andExpect(status().isNoContent());
         assertThat(read(call(get("/api/assignments"), patientToken, null))).isEmpty();
         assertThat(statusOf(read(call(get("/api/therapist/patients/" + patientId + "/assignments?includeHistory=true"),
@@ -196,6 +223,8 @@ class TherapistDashboardIntegrationTest {
         String patientToken = login(patient.get("email").asText(), "Temp1234");
         long prescriptionId = read(call(post("/api/therapist/patients/" + patientId + "/assignments"), therapistToken,
                 prescriptionBody(8, 1, 3))).get("id").asLong();
+        call(post("/api/therapist/assignments/" + prescriptionId + "/approve"), therapistToken, Map.of("readinessConfirmed", true))
+                .andExpect(status().isOk());
 
         // Before any session: the patient needs attention (prescription in force, nothing completed).
         JsonNode before = read(call(get("/api/therapist/dashboard"), therapistToken, null).andExpect(status().isOk()));

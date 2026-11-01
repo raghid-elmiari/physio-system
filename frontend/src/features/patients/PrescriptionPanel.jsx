@@ -10,14 +10,60 @@ import {
   describeDose,
 } from "../../lib/clinicalLabels";
 import { EmptyState, ErrorState, Field, Spinner } from "../../components/ui";
+import { formatMeasured } from "../../lib/clinicalLabels";
+import { MeasurementFields } from "../../components/clinical";
+import { measurementPayload, validateMeasurements } from "../../lib/measurements";
 
-const CURRENT_STATUSES = ["ACTIVE", "PAUSED"];
+/** parameterId → baseline measurement of the patient's approved baseline assessment. */
+async function baselineValues(patientId) {
+  const list = await therapistApi.patientAssessments(patientId);
+  const base = list.find((a) => a.isBaseline);
+  if (!base) return {};
+  const full = await therapistApi.assessment(base.id);
+  const out = {};
+  for (const item of full.items) for (const m of item.measurements) if (!m.superseded) out[m.parameterId] = m;
+  return out;
+}
+
+/** The treating therapist confirms readiness before the prescription goes into force. */
+function ApproveBox({ prescription, onCancel, onDone }) {
+  const [ready, setReady] = useState(false);
+  const [note, setNote] = useState("");
+  const [state, setState] = useState({ busy: false, error: null });
+  async function approve() {
+    setState({ busy: true, error: null });
+    try {
+      await therapistApi.approvePrescription(prescription.id, { readinessConfirmed: ready, note: note.trim() || null });
+      onDone();
+    } catch (err) {
+      setState({ busy: false, error: errorMessage(err) });
+    }
+  }
+  return (
+    <div className="confirm-box" style={{ marginTop: 10 }}>
+      <label className="switch"><input type="checkbox" checked={ready} onChange={(e) => setReady(e.target.checked)} /> I have assessed this patient and they are clinically ready for {prescription.exercise.name} at this dose.</label>
+      <Field label="Approval note (optional)" htmlFor={`appr-${prescription.id}`}>
+        <input id={`appr-${prescription.id}`} className="input" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+      </Field>
+      {state.error && <div className="alert error small" style={{ marginBottom: 8 }}>{state.error}</div>}
+      <div className="row">
+        <button type="button" className="btn sm" disabled={!ready || state.busy} onClick={approve}>{state.busy ? "Approving…" : "Approve prescription"}</button>
+        <button type="button" className="btn ghost sm" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+const CURRENT_STATUSES = ["PENDING_APPROVAL", "APPROVED", "ACTIVE", "PAUSED"];
 
 /** The patient's exercise program: prescribe from the library, edit, pause, resume, end, and the full history. */
-export default function PrescriptionPanel({ patientId, onProgramChanged }) {
+export default function PrescriptionPanel({ patientId, onProgramChanged, canDecide = true }) {
   const prescriptions = useApi(() => therapistApi.assignments(patientId, { includeHistory: true }), [patientId]);
   const exercises = useApi(() => exercisesApi.list(), []);
+  // Baseline values per parameter, shown beside the targets being set.
+  const baseline = useApi(() => baselineValues(patientId), [patientId]);
   const [editor, setEditor] = useState(null); // null | { mode: "new", exerciseId? } | { mode: "edit", prescription }
+  const [approving, setApproving] = useState(null);
   const [actionError, setActionError] = useState(null);
 
   const all = prescriptions.data || [];
@@ -47,6 +93,7 @@ export default function PrescriptionPanel({ patientId, onProgramChanged }) {
           key={editor.mode === "edit" ? `edit-${editor.prescription.id}` : `new-${editor.exerciseId ?? ""}`}
           patientId={patientId}
           exercises={exercises.data || []}
+          baseline={baseline.data || {}}
           editor={editor}
           onCancel={() => setEditor(null)}
           onSaved={() => { setEditor(null); refresh(); }}
@@ -59,6 +106,7 @@ export default function PrescriptionPanel({ patientId, onProgramChanged }) {
           {!editor && <button type="button" className="btn sm" onClick={() => setEditor({ mode: "new" })}>Prescribe exercise</button>}
         </div>
         {actionError && <div className="alert error" style={{ marginBottom: 12 }}>{actionError}</div>}
+        {!canDecide && <div className="alert info small" style={{ marginBottom: 12 }}>Only the patient&apos;s assigned physiotherapist can approve or resume prescriptions.</div>}
         {prescriptions.loading && <Spinner />}
         {prescriptions.error && <ErrorState message={prescriptions.error} onRetry={prescriptions.reload} />}
         {prescriptions.data && current.length === 0 && (
@@ -80,12 +128,24 @@ export default function PrescriptionPanel({ patientId, onProgramChanged }) {
                   {p.sessionsPerWeek ? ` · ${p.completedSessionsLast7Days} of ${p.sessionsPerWeek} done in the last 7 days` : ""}
                 </div>
                 {p.notes && <div className="sub">Instructions: “{p.notes}”</div>}
+                {p.safetyInstructions && <div className="sub warning-text">Safety: {p.safetyInstructions}</div>}
+                {p.targets?.length > 0 && (
+                  <div className="sub">Targets: {p.targets.map((t) => `${t.label} ${formatMeasured(t, t.unit)}${baseline.data?.[t.parameterId] ? ` (baseline ${formatMeasured(baseline.data[t.parameterId], t.unit)})` : ""}`).join(" · ")}</div>
+                )}
+                {p.approvedAt
+                  ? <div className="sub">Approved {formatDateTime(p.approvedAt)}{p.approvedBy ? ` by ${p.approvedBy}` : ""}{p.approvalNote ? ` – “${p.approvalNote}”` : ""}</div>
+                  : <div className="sub warning-text">Not approved: the patient cannot start this exercise yet.</div>}
+                {approving === p.id && (
+                  <ApproveBox prescription={p} onCancel={() => setApproving(null)} onDone={() => { setApproving(null); refresh(); }} />
+                )}
               </div>
               <div className="actions">
+                {p.status === "PENDING_APPROVAL" && canDecide && approving !== p.id && (
+                  <button type="button" className="btn sm" onClick={() => setApproving(p.id)}>Approve</button>
+                )}
                 <button type="button" className="btn secondary sm" onClick={() => setEditor({ mode: "edit", prescription: p })}>Edit</button>
-                {p.status === "ACTIVE"
-                  ? <button type="button" className="btn ghost sm" onClick={() => handleStatusChange(p, "PAUSED")}>Pause</button>
-                  : <button type="button" className="btn ghost sm" onClick={() => handleStatusChange(p, "ACTIVE")}>Resume</button>}
+                {(p.status === "ACTIVE" || p.status === "APPROVED") && <button type="button" className="btn ghost sm" onClick={() => handleStatusChange(p, "PAUSED")}>Pause</button>}
+                {p.status === "PAUSED" && canDecide && <button type="button" className="btn ghost sm" onClick={() => handleStatusChange(p, "ACTIVE")}>Resume</button>}
                 <button type="button" className="btn ghost sm" onClick={() => handleStatusChange(p, "COMPLETED", `Mark ${p.exercise.name} as completed? It leaves the patient's program.`)}>Complete</button>
                 <button type="button" className="btn ghost sm danger-text" onClick={() => handleStatusChange(p, "DISCONTINUED", `Discontinue ${p.exercise.name}? It leaves the patient's program; the history is kept.`)}>Discontinue</button>
               </div>
@@ -162,6 +222,11 @@ function initialForm(editor, exercises) {
       endDate: p.endDate ?? "",
       difficulty: p.difficulty ?? "",
       notes: p.notes ?? "",
+      instructions: p.instructions ?? "",
+      safetyInstructions: p.safetyInstructions ?? "",
+      expectedProgression: p.expectedProgression ?? "",
+      changeReason: "",
+      targets: Object.fromEntries((p.targets || []).map((t) => [t.parameterId, { value: t.targetValue ?? "", valueMin: t.targetMin ?? "", valueMax: t.targetMax ?? "" }])),
     };
   }
   const exercise = exercises.find((e) => e.id === editor.exerciseId);
@@ -176,6 +241,11 @@ function initialForm(editor, exercises) {
     endDate: "",
     difficulty: "MODERATE",
     notes: "",
+    instructions: exercise?.instructions ?? "",
+    safetyInstructions: "",
+    expectedProgression: "",
+    changeReason: "",
+    targets: {},
   };
 }
 
@@ -192,11 +262,12 @@ function validatePrescription(form) {
   return errors;
 }
 
-function PrescriptionForm({ patientId, exercises, editor, onCancel, onSaved }) {
+function PrescriptionForm({ patientId, exercises, baseline, editor, onCancel, onSaved }) {
   const [form, setForm] = useState(() => initialForm(editor, exercises));
-  const [state, setState] = useState({ busy: false, error: null, fields: {} });
+  const [state, setState] = useState({ busy: false, error: null, fields: {}, targets: {} });
   const editing = editor.mode === "edit";
-  const selectedExercise = exercises.find((e) => String(e.id) === form.exerciseId);
+  const selectedExercise = editing ? editor.prescription.exercise : exercises.find((e) => String(e.id) === form.exerciseId);
+  const params = (selectedExercise?.parameters || []).filter((p) => p.active);
 
   const setText = (key) => (e) => setForm({ ...form, [key]: e.target.value });
   const setNumber = (key) => (e) => setForm({ ...form, [key]: e.target.value === "" ? "" : Number(e.target.value) });
@@ -204,8 +275,9 @@ function PrescriptionForm({ patientId, exercises, editor, onCancel, onSaved }) {
   async function handleSavePrescription(e) {
     e.preventDefault();
     const fields = validatePrescription(form);
-    if (Object.keys(fields).length) return setState({ busy: false, error: null, fields });
-    setState({ busy: true, error: null, fields: {} });
+    const targetErrors = validateMeasurements(params, form.targets);
+    if (Object.keys(fields).length || Object.keys(targetErrors).length) return setState({ busy: false, error: null, fields, targets: targetErrors });
+    setState({ busy: true, error: null, fields: {}, targets: {} });
     const orNull = (value) => (value === "" ? null : value);
     const body = {
       exerciseId: Number(form.exerciseId),
@@ -218,13 +290,18 @@ function PrescriptionForm({ patientId, exercises, editor, onCancel, onSaved }) {
       endDate: orNull(form.endDate),
       difficulty: orNull(form.difficulty),
       notes: form.notes.trim() || null,
+      instructions: form.instructions.trim() || null,
+      safetyInstructions: form.safetyInstructions.trim() || null,
+      expectedProgression: form.expectedProgression.trim() || null,
+      changeReason: form.changeReason.trim() || null,
+      targets: measurementPayload(params, form.targets).map((m) => ({ parameterId: m.parameterId, targetValue: m.value ?? null, targetMin: m.valueMin ?? null, targetMax: m.valueMax ?? null })),
     };
     try {
       if (editing) await therapistApi.revisePrescription(editor.prescription.id, body);
       else await therapistApi.assign(patientId, body);
       onSaved();
     } catch (err) {
-      setState({ busy: false, error: errorMessage(err), fields: fieldErrors(err) });
+      setState({ busy: false, error: errorMessage(err), fields: fieldErrors(err), targets: {} });
     }
   }
 
@@ -232,6 +309,7 @@ function PrescriptionForm({ patientId, exercises, editor, onCancel, onSaved }) {
     <form className="card" onSubmit={handleSavePrescription} noValidate>
       <h2>{editing ? `Edit prescription: ${editor.prescription.exercise.name}` : "Prescribe an exercise"}</h2>
       {editing && <p className="small muted">Saving creates a new version of this prescription; the current one is kept in the history.</p>}
+      {!editing && <p className="small muted">New prescriptions wait for your approval before the patient can start them.</p>}
       <Field label="Exercise" htmlFor="rx-exercise" error={state.fields.exerciseId}>
         <select id="rx-exercise" className="input" value={form.exerciseId} disabled={editing} onChange={setText("exerciseId")}>
           <option value="">Choose from the library…</option>
@@ -255,9 +333,32 @@ function PrescriptionForm({ patientId, exercises, editor, onCancel, onSaved }) {
         <Field label="Start date" htmlFor="rx-start" error={state.fields.startDate}><input id="rx-start" type="date" className="input" value={form.startDate} onChange={setText("startDate")} /></Field>
         <Field label="End date" htmlFor="rx-end" error={state.fields.endDate} help="Optional"><input id="rx-end" type="date" className="input" value={form.endDate} onChange={setText("endDate")} /></Field>
       </div>
-      <Field label="Instructions for the patient" htmlFor="rx-notes" error={state.fields.notes} help="Shown on the patient's dashboard.">
+      {params.length > 0 && (
+        <fieldset className="measure-field" style={{ marginBottom: 14 }}>
+          <legend>Personal targets</legend>
+          <p className="small muted" style={{ margin: 0 }}>Leave a measurement empty for no target. The patient cannot change these, and nothing increases them automatically.</p>
+          <MeasurementFields parameters={params} values={form.targets} onChange={(targets) => setForm({ ...form, targets })} errors={state.targets} idPrefix="rx-t" baseline={baseline} />
+        </fieldset>
+      )}
+      <Field label="Short note for the patient" htmlFor="rx-notes" error={state.fields.notes} help="Shown on the patient's dashboard.">
         <textarea id="rx-notes" className="input" rows={2} maxLength={500} value={form.notes} onChange={setText("notes")} />
       </Field>
+      <Field label="Exercise instructions" htmlFor="rx-instr" error={state.fields.instructions} help="A copy for this patient; editing the library later does not change it.">
+        <textarea id="rx-instr" className="input" rows={3} maxLength={4000} value={form.instructions} onChange={setText("instructions")} />
+      </Field>
+      <div className="grid cols-2" style={{ gap: 0, columnGap: 12 }}>
+        <Field label="Safety instructions" htmlFor="rx-safety" error={state.fields.safetyInstructions}>
+          <textarea id="rx-safety" className="input" rows={2} maxLength={1000} value={form.safetyInstructions} onChange={setText("safetyInstructions")} />
+        </Field>
+        <Field label="Expected progression" htmlFor="rx-prog" error={state.fields.expectedProgression} help="Your plan; it never changes the prescription by itself.">
+          <textarea id="rx-prog" className="input" rows={2} maxLength={1000} value={form.expectedProgression} onChange={setText("expectedProgression")} />
+        </Field>
+      </div>
+      {editing && (
+        <Field label="Reason for the change" htmlFor="rx-reason" error={state.fields.changeReason}>
+          <input id="rx-reason" className="input" maxLength={500} value={form.changeReason} onChange={setText("changeReason")} />
+        </Field>
+      )}
       {state.error && <div className="alert error" style={{ marginBottom: 12 }}>{state.error}</div>}
       <div className="row">
         <button type="submit" className="btn" disabled={state.busy}>{state.busy ? "Saving…" : editing ? "Save new version" : "Save prescription"}</button>

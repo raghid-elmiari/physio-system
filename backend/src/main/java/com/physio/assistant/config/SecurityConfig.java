@@ -61,6 +61,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/device/**").hasRole("DEVICE")
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/therapist/**").hasAnyRole("THERAPIST", "ADMIN")
+                // Patient self-service: assessments, performance logging, video suggestions.
+                .requestMatchers("/api/patient/**").hasRole("PATIENT")
                 .requestMatchers(HttpMethod.GET, "/api/devices").hasAnyRole("THERAPIST", "ADMIN")
                 // The SockJS/WebSocket handshake cannot carry an Authorization header; the STOMP
                 // CONNECT frame is authenticated instead (WebSocketConfig).

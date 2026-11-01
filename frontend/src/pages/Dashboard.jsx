@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { exercisesApi, sessionsApi } from "../api/services";
+import { exercisesApi, patientApi, sessionsApi } from "../api/services";
+import { ASSESSMENT_STATUS_LABELS, ASSESSMENT_STATUS_TONES } from "../lib/clinicalLabels";
 import { useAuth } from "../context/AuthContext";
 import { useApi } from "../lib/useApi";
 import { formatDateTime, relativeDay, sessionAccuracy } from "../lib/format";
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const assignments = useApi(() => exercisesApi.myAssignments(), []);
   const progress = useApi(() => sessionsApi.progress(30), []);
   const sessions = useApi(() => sessionsApi.history(), []);
+  const assessment = useApi(() => patientApi.assessmentStatus(), []);
 
   const totals = progress.data?.totals;
   const recent = (sessions.data || []).slice(0, 5);
@@ -28,6 +30,7 @@ export default function Dashboard() {
       </div>
 
       <div className="stack">
+        {assessment.data && <AssessmentCard status={assessment.data} />}
         {progress.error ? (
           <ErrorState message={progress.error} onRetry={progress.reload} />
         ) : (
@@ -46,7 +49,7 @@ export default function Dashboard() {
           {assignments.data && assignments.data.length === 0 && (
             <div className="card">
               <EmptyState icon="🗒" title="No exercises assigned yet">
-                Your therapist has not assigned a program yet. You can still practise from the <Link to="/exercises">exercise library</Link>.
+                Your physiotherapist has not prescribed exercises yet. Complete your <Link to="/assessment">physical assessment</Link> so they can plan your program.
               </EmptyState>
             </div>
           )}
@@ -97,5 +100,31 @@ export default function Dashboard() {
         </div>
       </div>
     </main>
+  );
+}
+
+const ASSESSMENT_HINT = {
+  NOT_STARTED: "Record what you can currently do so your physiotherapist can set your starting point.",
+  IN_PROGRESS: "Your assessment draft is saved. Finish and submit it.",
+  SUBMITTED: "Submitted. It will be reviewed once a physiotherapist is assigned to you.",
+  PENDING_REVIEW: "Submitted. Your physiotherapist will review it.",
+  REVISION_REQUESTED: "Your physiotherapist asked you to revise your assessment.",
+};
+
+/** Shown until the baseline is approved (and whenever a revision is requested). */
+function AssessmentCard({ status }) {
+  if (status.status === "APPROVED") return null;
+  const action = status.status === "NOT_STARTED" ? "Start assessment" : status.status === "IN_PROGRESS" || status.status === "REVISION_REQUESTED" ? "Continue" : "View";
+  const to = status.currentAssessmentId && !status.canStartNew ? `/assessment/${status.currentAssessmentId}` : "/assessment";
+  return (
+    <section className="card status-banner" aria-labelledby="assess-h">
+      <div className="row">
+        <h2 id="assess-h" style={{ margin: 0 }}>Physical assessment</h2>
+        <span className={`badge ${ASSESSMENT_STATUS_TONES[status.status] ?? ""}`}>{ASSESSMENT_STATUS_LABELS[status.status]}</span>
+        <span className="spacer" />
+        <Link className="btn sm" to={to}>{action}</Link>
+      </div>
+      <p className="small muted" style={{ margin: "8px 0 0" }}>{ASSESSMENT_HINT[status.status]}</p>
+    </section>
   );
 }

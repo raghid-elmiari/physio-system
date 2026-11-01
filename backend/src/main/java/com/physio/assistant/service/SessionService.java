@@ -36,6 +36,8 @@ public class SessionService {
     private final ExerciseAssignmentRepository assignmentRepository;
     private final DeviceRepository deviceRepository;
     private final UserRepository userRepository;
+    private final ExerciseService exerciseService;
+    private final PerformanceService performanceService;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final int staleAfterHours;
@@ -48,6 +50,8 @@ public class SessionService {
             ExerciseAssignmentRepository assignmentRepository,
             DeviceRepository deviceRepository,
             UserRepository userRepository,
+            ExerciseService exerciseService,
+            PerformanceService performanceService,
             SimpMessagingTemplate messagingTemplate,
             ObjectMapper objectMapper,
             @Value("${app.sessions.stale-after-hours}") int staleAfterHours
@@ -59,6 +63,8 @@ public class SessionService {
         this.assignmentRepository = assignmentRepository;
         this.deviceRepository = deviceRepository;
         this.userRepository = userRepository;
+        this.exerciseService = exerciseService;
+        this.performanceService = performanceService;
         this.messagingTemplate = messagingTemplate;
         this.objectMapper = objectMapper;
         this.staleAfterHours = staleAfterHours;
@@ -75,6 +81,11 @@ public class SessionService {
         User user = userRepository.findById(userId).orElseThrow(() -> ApiException.unauthorized("Unknown user"));
         Exercise exercise = requireExercise(req.exerciseId());
         ExerciseAssignment assignment = resolveAssignment(userId, req.assignmentId(), exercise);
+        if (user.isPatient()) {
+            // Patients may only perform exercises their physiotherapist has prescribed AND approved.
+            if (assignment == null) assignment = findPerformablePrescription(userId, exercise);
+            exerciseService.requirePerformable(assignment);
+        }
 
         Session session = new Session();
         session.setUser(user);
@@ -138,6 +149,7 @@ public class SessionService {
         if (req.startedAt().isAfter(LocalDateTime.now().plusMinutes(5))) {
             throw ApiException.badRequest("startedAt cannot be in the future");
         }
+        if (user.isPatient()) requireApprovedWhenPerformedOffline(userId, req, exercise);
         Session session = new Session();
         session.setUser(user);
         session.setExercise(exercise);
@@ -258,6 +270,36 @@ public class SessionService {
                 .orElseThrow(() -> ApiException.notFound("Exercise not found: " + exerciseId));
     }
 
+    /** The patient's prescription for this exercise that is in force today, or 409 explaining why there is none. */
+    private ExerciseAssignment findPerformablePrescription(Long userId, Exercise exercise) {
+        List<ExerciseAssignment> forExercise = assignmentRepository
+                .findByPatientIdAndStatusInOrderByCreatedAtDesc(userId, ExerciseService.PATIENT_PROGRAM_STATUSES).stream()
+                .filter(a -> a.getExercise().getId().equals(exercise.getId()))
+                .toList();
+        if (forExercise.isEmpty()) {
+            throw ApiException.conflict("This exercise is not in your program. Ask your physiotherapist to prescribe it.");
+        }
+        java.time.LocalDate today = java.time.LocalDate.now();
+        return forExercise.stream().filter(a -> ExerciseService.startBlockedReason(a, today) == null).findFirst()
+                .orElse(forExercise.get(0)); // requirePerformable then reports why it cannot start
+    }
+
+    /**
+     * A session recorded offline is accepted when the prescription it belongs to had been approved
+     * before the session started (it may have been paused or ended since).
+     */
+    private void requireApprovedWhenPerformedOffline(Long userId, SyncSessionRequest req, Exercise exercise) {
+        ExerciseAssignment a = req.assignmentId() == null ? null : resolveAssignment(userId, req.assignmentId(), exercise);
+        List<ExerciseAssignment> candidates = a != null ? List.of(a)
+                : assignmentRepository.findByPatientIdOrderByCreatedAtDesc(userId).stream()
+                    .filter(x -> x.getExercise().getId().equals(exercise.getId())).toList();
+        boolean approvedInTime = candidates.stream().anyMatch(x -> x.getApprovedAt() != null
+                && !x.getApprovedAt().isAfter(req.startedAt().plusMinutes(5)));
+        if (!approvedInTime) {
+            throw ApiException.conflict("This session was not part of an approved prescription and cannot be saved");
+        }
+    }
+
     private ExerciseAssignment resolveAssignment(Long userId, Long assignmentId, Exercise exercise) {
         if (assignmentId == null) return null;
         ExerciseAssignment a = assignmentRepository.findById(assignmentId)
@@ -311,6 +353,10 @@ public class SessionService {
         report.setCommonMistakesJson(toJson(mistakes(req.errorCounts(), req.errorMessages())));
         report.setMetricsJson(req.metrics() == null || req.metrics().isNull() ? null : req.metrics().toString());
         reportRepository.save(report);
+        // Computer vision results enter the same performance history as manual entries.
+        if (session.getAssignment() != null && session.getUser().isPatient()) {
+            performanceService.recordFromComputerVision(session, req.metrics(), req.errorCounts());
+        }
         return toReport(session, report);
     }
 

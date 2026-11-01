@@ -88,6 +88,25 @@ class ApiIntegrationTest {
         return userRepository.save(u);
     }
 
+    /**
+     * A registered patient whose physiotherapist has prescribed and approved Shoulder Raise:
+     * since the clinical workflow, patients can only start approved prescriptions.
+     */
+    private String patientWithApprovedShoulderRaise() throws Exception {
+        String email = uniqueEmail();
+        String patient = token(register(email));
+        String therapistEmail = uniqueEmail();
+        createUser(therapistEmail, User.Role.THERAPIST);
+        String therapist = login(therapistEmail);
+        long patientId = read(call(post("/api/therapist/patients"), therapist, Map.of("email", email))
+                .andExpect(status().isOk())).get("id").asLong();
+        long rx = read(call(post("/api/therapist/patients/" + patientId + "/assignments"), therapist,
+                Map.of("exerciseId", shoulderRaiseId(patient), "targetReps", 10)).andExpect(status().isCreated())).get("id").asLong();
+        call(post("/api/therapist/assignments/" + rx + "/approve"), therapist, Map.of("readinessConfirmed", true))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+        return patient;
+    }
+
     private String login(String email) throws Exception {
         return token(read(call(post("/api/auth/login"), null, Map.of("email", email, "password", "Secret123"))
                 .andExpect(status().isOk())));
@@ -190,7 +209,7 @@ class ApiIntegrationTest {
 
     @Test
     void sessionLifecycleWithOnDeviceSummary() throws Exception {
-        String t = token(register(uniqueEmail()));
+        String t = patientWithApprovedShoulderRaise();
         long exerciseId = shoulderRaiseId(t);
         String clientId = UUID.randomUUID().toString();
 
@@ -253,15 +272,22 @@ class ApiIntegrationTest {
 
     @Test
     void offlineSyncIsIdempotent() throws Exception {
-        String t = token(register(uniqueEmail()));
+        String t = patientWithApprovedShoulderRaise();
         long exerciseId = shoulderRaiseId(t);
         Map<String, Object> body = Map.of(
                 "clientSessionId", "offline-" + UUID.randomUUID(),
                 "exerciseId", exerciseId,
                 "roundsRequested", 6,
-                "startedAt", LocalDateTime.now().minusMinutes(10).toString(),
-                "endedAt", LocalDateTime.now().minusMinutes(5).toString(),
-                "summary", Map.of("roundsCompleted", 6, "correctReps", 6, "durationSeconds", 300));
+                "startedAt", LocalDateTime.now().minusMinutes(2).toString(),
+                "endedAt", LocalDateTime.now().minusMinutes(1).toString(),
+                "summary", Map.of("roundsCompleted", 6, "correctReps", 6, "durationSeconds", 60));
+        // A session recorded offline before the prescription was approved is refused.
+        Map<String, Object> beforeApproval = new java.util.HashMap<>(body);
+        beforeApproval.put("clientSessionId", "offline-" + UUID.randomUUID());
+        beforeApproval.put("startedAt", LocalDateTime.now().minusHours(2).toString());
+        beforeApproval.put("endedAt", LocalDateTime.now().minusHours(1).toString());
+        call(post("/api/sessions/sync"), t, beforeApproval).andExpect(status().isConflict());
+
         JsonNode first = read(call(post("/api/sessions/sync"), t, body).andExpect(status().isOk()));
         JsonNode second = read(call(post("/api/sessions/sync"), t, body).andExpect(status().isOk()));
         assertThat(second.get("sessionId").asLong()).isEqualTo(first.get("sessionId").asLong());
@@ -271,7 +297,7 @@ class ApiIntegrationTest {
 
     @Test
     void usersCannotAccessOtherUsersSessions() throws Exception {
-        String alice = token(register(uniqueEmail()));
+        String alice = patientWithApprovedShoulderRaise();
         String bob = token(register(uniqueEmail()));
         long exerciseId = shoulderRaiseId(alice);
         long sessionId = read(call(post("/api/sessions"), alice, Map.of("exerciseId", exerciseId))).get("id").asLong();
@@ -346,6 +372,13 @@ class ApiIntegrationTest {
                 Map.of("exerciseId", exerciseId, "targetReps", 12, "notes", "Slow and controlled"))
                 .andExpect(status().isCreated()));
         long assignmentId = assignment.get("id").asLong();
+        assertThat(assignment.get("status").asText()).isEqualTo("PENDING_APPROVAL");
+
+        // Prescribed is not cleared: the patient cannot start until the therapist approves.
+        call(post("/api/sessions"), patient, Map.of("exerciseId", exerciseId, "assignmentId", assignmentId))
+                .andExpect(status().isConflict());
+        call(post("/api/therapist/assignments/" + assignmentId + "/approve"), therapist, Map.of("readinessConfirmed", true))
+                .andExpect(status().isOk());
 
         call(get("/api/assignments"), patient, null)
                 .andExpect(status().isOk())
@@ -386,7 +419,7 @@ class ApiIntegrationTest {
                 .andExpect(status().isOk()));
         String apiKey = reg.get("apiKey").asText();
 
-        String patient = token(register(uniqueEmail()));
+        String patient = patientWithApprovedShoulderRaise();
         long exerciseId = shoulderRaiseId(patient);
         long unbound = read(call(post("/api/sessions"), patient, Map.of("exerciseId", exerciseId))).get("id").asLong();
         long bound = read(call(post("/api/sessions"), patient, Map.of("exerciseId", exerciseId, "deviceId", deviceId)))

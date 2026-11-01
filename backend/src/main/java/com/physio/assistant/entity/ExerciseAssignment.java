@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.Setter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A physiotherapist's exercise prescription for one patient.
@@ -13,6 +15,10 @@ import java.time.LocalDateTime;
  * prescription linked through {@code previousAssignment} and marks the old one REPLACED, so
  * sessions keep pointing at the prescription that was actually in force and the full
  * prescription history is preserved.
+ *
+ * A new prescription is PENDING_APPROVAL: being prescribed is not clinical clearance. The
+ * patient's assigned physiotherapist approves it (APPROVED, or ACTIVE once its start date is
+ * reached); only an ACTIVE prescription can be started by the patient.
  */
 @Entity
 @Table(name = "exercise_assignments")
@@ -67,13 +73,41 @@ public class ExerciseAssignment {
     @Column(length = 500)
     private String notes;
 
+    /** Patient-specific exercise instructions (defaults to the library instructions when prescribed). */
+    @Column(length = 4000)
+    private String instructions;
+
+    @Column(name = "safety_instructions", length = 1000)
+    private String safetyInstructions;
+
+    @Column(name = "expected_progression", length = 1000)
+    private String expectedProgression;
+
+    /** Why this version was created (revisions only). */
+    @Column(name = "change_reason", length = 500)
+    private String changeReason;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "approved_by_id")
+    private User approvedBy;
+
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
+
+    @Column(name = "approval_note", length = 500)
+    private String approvalNote;
+
+    @OneToMany(mappedBy = "assignment", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    private List<PrescriptionTarget> targets = new ArrayList<>();
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private Status status = Status.ACTIVE;
+    private Status status = Status.PENDING_APPROVAL;
 
     // Mirrors status == ACTIVE. Kept for the queries and clients that predate `status`.
     @Column(nullable = false)
-    private boolean active = true;
+    private boolean active = false;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "previous_assignment_id")
@@ -108,7 +142,18 @@ public class ExerciseAssignment {
                 && (endDate == null || !day.isAfter(endDate));
     }
 
-    public enum Status { ACTIVE, PAUSED, DISCONTINUED, COMPLETED, REPLACED }
+    /** True once a physiotherapist has approved this prescription (or the version it replaced was approved). */
+    public boolean isApproved() {
+        return approvedAt != null;
+    }
+
+    /** Shown in the patient's program (including ones not yet startable, with their status). */
+    public boolean isVisibleToPatient() {
+        return status == Status.PENDING_APPROVAL || status == Status.APPROVED
+                || status == Status.ACTIVE || status == Status.PAUSED;
+    }
+
+    public enum Status { PENDING_APPROVAL, APPROVED, ACTIVE, PAUSED, DISCONTINUED, COMPLETED, REPLACED }
 
     public enum Difficulty { EASY, MODERATE, HARD }
 }

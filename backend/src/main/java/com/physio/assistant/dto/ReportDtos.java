@@ -25,8 +25,15 @@ public class ReportDtos {
             PeriodComparison previousPeriod,
             List<SessionPerformance> sessions,
             AutomatedFindings automatedFindings,
-            LocalDateTime generatedAt
-    ) {}
+            LocalDateTime generatedAt,
+            /** Baseline vs target vs actual (frozen in reports generated since the clinical workflow; null in older ones). */
+            com.physio.assistant.dto.ClinicalDtos.RehabProgressResponse rehabProgress
+    ) {
+        public PatientMeasurements withRehabProgress(com.physio.assistant.dto.ClinicalDtos.RehabProgressResponse progress) {
+            return new PatientMeasurements(patient, period, totals, prescriptions, exercises, previousPeriod, sessions,
+                    automatedFindings, generatedAt, progress);
+        }
+    }
 
     public record PatientInfo(Long id, String name, String email, LocalDate dateOfBirth, String primaryCondition) {}
 

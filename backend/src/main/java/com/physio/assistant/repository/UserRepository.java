@@ -12,4 +12,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByEmailIgnoreCase(String email);
     List<User> findByTherapistIdOrderByLastNameAscFirstNameAsc(Long therapistId);
     List<User> findByRoleOrderByLastNameAscFirstNameAsc(User.Role role);
+    List<User> findAllByOrderByLastNameAscFirstNameAsc();
+    long countByRole(User.Role role);
+    long countByRoleAndStatus(User.Role role, User.Status status);
+    long countByTherapistId(Long therapistId);
 }

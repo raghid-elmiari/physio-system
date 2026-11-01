@@ -8,7 +8,7 @@ voice coach, which are unchanged.
 
 | | Physiotherapist | Admin | Patient |
 |---|---|---|---|
-| Dashboard, patient list | own linked patients | all patients | no (403) |
+| Dashboard, patient list | own linked patients | all patients (read; clinical approvals belong to the assigned therapist) | no (403) |
 | Patient profile, prescriptions, notes, performance, reports | own linked patients | all patients | no (403) |
 | Own program, sessions, progress | n/a | n/a | yes |
 | Reports | write | write | read, only once shared, only their own |
@@ -54,15 +54,21 @@ recommendations, exercise modifications, follow-up), **Download PDF**, **Print**
 
 ## Prescription workflow
 
-1. The physiotherapist prescribes an exercise from the library.
-2. It is stored in `exercise_assignments` and appears on the patient's dashboard at once
-   (dose, dates, difficulty and instructions shown on the exercise card).
-3. The patient starts a session from the card; the session is linked to the prescription.
+> Updated November 2026 (see [CLINICAL_WORKFLOW.md](CLINICAL_WORKFLOW.md)): prescriptions now
+> carry personal targets and need explicit approval by the patient's own physiotherapist.
+
+1. The physiotherapist prescribes an exercise from the library, optionally with personal
+   targets per measurement (shown beside the patient's baseline), instructions and safety notes.
+2. It is stored in `exercise_assignments` with status **Awaiting approval** and shows on the
+   patient's dashboard with that status; the patient cannot start or log it yet.
+3. The physiotherapist confirms the patient is clinically ready and **approves** it (Active, or
+   Approved until its start date). Only then can the patient start a session from the card or
+   log their performance; sessions are linked to the prescription.
 4. **Editing creates a new version.** The old row becomes `REPLACED` and the new one points
    to it (`previous_assignment_id`). Sessions stay linked to the dose that was actually
    prescribed at the time, and nothing is overwritten.
-5. Pausing hides it from the patient's program until resumed; completing or discontinuing
-   ends it. History is never deleted.
+5. Pausing keeps it visible to the patient as "Paused" but it cannot be started until the
+   physiotherapist resumes it; completing or discontinuing ends it. History is never deleted.
 
 ## What the measurements are (and aren't)
 

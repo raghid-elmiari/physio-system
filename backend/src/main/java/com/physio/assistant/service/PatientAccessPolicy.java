@@ -40,6 +40,30 @@ public class PatientAccessPolicy {
                 && patient.getTherapist().getId().equals(staffMember.userId());
     }
 
+    /**
+     * Clinical decisions (approving assessments, prescriptions and videos) belong to the
+     * patient's assigned physiotherapist only. Others who may see the patient (another
+     * therapist cannot; an admin can) get 404 or 403 respectively.
+     */
+    public User requireTreatingTherapist(AuthPrincipal staffMember, Long patientId) {
+        User patient = requireAccessiblePatient(staffMember, patientId);
+        if (!isTreatingTherapist(staffMember, patient)) {
+            throw ApiException.forbidden("Only the patient's assigned physiotherapist can make this decision");
+        }
+        return patient;
+    }
+
+    public boolean isTreatingTherapist(AuthPrincipal staffMember, User patient) {
+        return "THERAPIST".equals(staffMember.role())
+                && patient.getTherapist() != null
+                && patient.getTherapist().getId().equals(staffMember.userId());
+    }
+
+    /** IDs of the patients in this staff member's caseload. */
+    public List<Long> caseloadIds(AuthPrincipal staffMember) {
+        return caseload(staffMember).stream().map(User::getId).toList();
+    }
+
     /** The patients this staff member is responsible for, sorted by name. */
     public List<User> caseload(AuthPrincipal staffMember) {
         return isAdmin(staffMember)
